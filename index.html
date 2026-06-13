@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FF15 スナップショットビューア</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0d0d0f;
+    --bg2: #16161a;
+    --bg3: #1e1e24;
+    --border: rgba(255,255,255,0.08);
+    --border-hover: rgba(255,255,255,0.16);
+    --text: #f0ede8;
+    --text2: #9994a0;
+    --text3: #605c6a;
+    --gold: #c9a84c;
+    --gold2: #e8c97a;
+    --radius: 8px;
+    --radius-lg: 12px;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  header {
+    padding: 28px 32px 20px;
+    border-bottom: 0.5px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+  }
+
+  header h1 {
+    font-size: 15px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--gold);
+  }
+
+  header span {
+    font-size: 12px;
+    color: var(--text3);
+    letter-spacing: 0.04em;
+  }
+
+  main {
+    flex: 1;
+    padding: 28px 32px;
+  }
+
+  /* Drop zone */
+  #drop-zone {
+    border: 1px dashed var(--border-hover);
+    border-radius: var(--radius-lg);
+    padding: 48px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    margin-bottom: 28px;
+    position: relative;
+  }
+
+  #drop-zone:hover, #drop-zone.drag-over {
+    border-color: var(--gold);
+    background: rgba(201,168,76,0.04);
+  }
+
+  #drop-zone input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    width: 100%;
+    height: 100%;
+  }
+
+  #drop-zone svg {
+    display: block;
+    margin: 0 auto 16px;
+    color: var(--text3);
+  }
+
+  #drop-zone p.primary {
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+
+  #drop-zone p.secondary {
+    font-size: 13px;
+    color: var(--text2);
+    margin-bottom: 8px;
+  }
+
+  #drop-zone p.note {
+    font-size: 11px;
+    color: var(--text3);
+    letter-spacing: 0.03em;
+  }
+
+  /* Stats bar */
+  #stats {
+    display: none;
+    font-size: 12px;
+    color: var(--text3);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 20px;
+    padding-bottom: 14px;
+    border-bottom: 0.5px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  #stats.hidden { display: none !important; }
+
+  #stats .count {
+    color: var(--gold);
+    font-weight: 500;
+    font-size: 15px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Error */
+  #err-banner {
+    display: none;
+    background: rgba(220,50,50,0.1);
+    border: 0.5px solid rgba(220,50,50,0.3);
+    color: #f87171;
+    border-radius: var(--radius);
+    padding: 10px 16px;
+    font-size: 13px;
+    margin-bottom: 20px;
+  }
+
+  /* Gallery */
+  #gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 10px;
+  }
+
+  .thumb {
+    position: relative;
+    aspect-ratio: 16/9;
+    overflow: hidden;
+    border-radius: var(--radius);
+    border: 0.5px solid var(--border);
+    cursor: pointer;
+    background: var(--bg3);
+  }
+
+  .thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: transform 0.25s ease;
+  }
+
+  .thumb:hover img { transform: scale(1.06); }
+
+  .thumb .overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 50%);
+    opacity: 0;
+    transition: opacity 0.2s;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    padding: 8px 10px;
+  }
+
+  .thumb:hover .overlay { opacity: 1; }
+
+  .thumb .overlay .name {
+    font-size: 11px;
+    color: rgba(255,255,255,0.7);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 70%;
+  }
+
+  .thumb .overlay .dl-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.12);
+    border: 0.5px solid rgba(255,255,255,0.25);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.15s;
+  }
+
+  .thumb .overlay .dl-btn:hover { background: rgba(255,255,255,0.25); }
+
+  /* Lightbox */
+  #lightbox {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(5,5,7,0.94);
+    z-index: 9000;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+  }
+
+  #lightbox.open { display: flex; }
+
+  #lb-img-wrap {
+    position: relative;
+    max-width: 92vw;
+    max-height: 80vh;
+  }
+
+  #lb-img {
+    max-width: 92vw;
+    max-height: 80vh;
+    border-radius: var(--radius);
+    display: block;
+  }
+
+  #lb-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  #lb-bar button {
+    height: 36px;
+    padding: 0 16px;
+    border-radius: var(--radius);
+    border: 0.5px solid rgba(255,255,255,0.18);
+    background: rgba(255,255,255,0.07);
+    color: #fff;
+    font-size: 13px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: background 0.15s;
+    white-space: nowrap;
+  }
+
+  #lb-bar button:hover { background: rgba(255,255,255,0.14); }
+
+  #lb-bar button.icon-only { padding: 0 10px; }
+
+  #lb-name {
+    font-size: 12px;
+    color: rgba(255,255,255,0.4);
+    min-width: 140px;
+    text-align: center;
+    letter-spacing: 0.03em;
+  }
+
+  #lb-counter {
+    font-size: 12px;
+    color: rgba(255,255,255,0.3);
+    font-variant-numeric: tabular-nums;
+    min-width: 50px;
+    text-align: center;
+  }
+
+  footer {
+    padding: 16px 32px;
+    border-top: 0.5px solid var(--border);
+    font-size: 11px;
+    color: var(--text3);
+    letter-spacing: 0.04em;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>FF15 Snapshot Viewer</h1>
+  <span>データは端末内でのみ処理されます</span>
+</header>
+
+<main>
+  <div id="drop-zone">
+    <input type="file" id="file-input" multiple accept=".ss" aria-label="SSファイルを選択">
+    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
+      <polyline points="21 15 16 10 5 21"/>
+    </svg>
+    <p class="primary">SSファイルを選択</p>
+    <p class="secondary">クリック、またはここにファイルをドロップ</p>
+    <p class="note">対応: .ss（複数ファイル可）</p>
+  </div>
+
+  <div id="err-banner" role="alert"></div>
+
+  <div id="stats" class="hidden">
+    <span><span class="count" id="stat-count">0</span> 枚</span>
+    <span id="stat-fail" style="color:#f87171;display:none"></span>
+  </div>
+
+  <div id="gallery" role="list" aria-label="スナップショット一覧"></div>
+</main>
+
+<div id="lightbox" role="dialog" aria-modal="true" aria-label="スナップショット拡大表示">
+  <div id="lb-img-wrap">
+    <img id="lb-img" src="" alt="スナップショット拡大">
+  </div>
+  <div id="lb-bar">
+    <button id="lb-prev" class="icon-only" aria-label="前へ">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+    </button>
+    <span id="lb-counter"></span>
+    <button id="lb-next" class="icon-only" aria-label="次へ">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+    </button>
+    <span id="lb-name"></span>
+    <button id="lb-dl">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      JPEGで保存
+    </button>
+    <button id="lb-close" class="icon-only" aria-label="閉じる">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+</div>
+
+<footer>FF15 スナップショットビューア — サーバーへのデータ送信なし、ブラウザ内完結</footer>
+
+<script>
+  const gallery = document.getElementById('gallery');
+  const statsEl = document.getElementById('stats');
+  const statCount = document.getElementById('stat-count');
+  const statFail = document.getElementById('stat-fail');
+  const errBanner = document.getElementById('err-banner');
+  const dropZone = document.getElementById('drop-zone');
+  const fileInput = document.getElementById('file-input');
+  const lightbox = document.getElementById('lightbox');
+  const lbImg = document.getElementById('lb-img');
+  const lbName = document.getElementById('lb-name');
+  const lbCounter = document.getElementById('lb-counter');
+
+  let images = [];
+  let lbIdx = 0;
+  let totalLoaded = 0;
+  let totalFailed = 0;
+
+  function findJpegOffset(buffer) {
+    const bytes = new Uint8Array(buffer);
+    for (let i = 0; i < bytes.length - 3; i++) {
+      if (bytes[i] === 0xFF && bytes[i+1] === 0xD8 && bytes[i+2] === 0xFF) return i;
+    }
+    return -1;
+  }
+
+  function processFiles(files) {
+    const ssFiles = Array.from(files);
+    if (!ssFiles.length) return;
+    errBanner.style.display = 'none';
+
+    let pending = ssFiles.length;
+
+    ssFiles.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = e => {
+        const buf = e.target.result;
+        const offset = findJpegOffset(buf);
+        if (offset < 0) {
+          totalFailed++;
+        } else {
+          const blob = new Blob([buf.slice(offset)], { type: 'image/jpeg' });
+          const url = URL.createObjectURL(blob);
+          const idx = images.length;
+          images.push({ url, name: file.name, blob });
+          totalLoaded++;
+          addThumb(idx, url, file.name);
+        }
+        pending--;
+        if (pending === 0) updateStats();
+      };
+      reader.onerror = () => {
+        totalFailed++;
+        pending--;
+        if (pending === 0) updateStats();
+      };
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  function addThumb(idx, url, name) {
+    const div = document.createElement('div');
+    div.className = 'thumb';
+    div.setAttribute('role', 'listitem');
+    div.setAttribute('tabindex', '0');
+    div.setAttribute('aria-label', name);
+
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = name;
+    img.loading = 'lazy';
+
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'name';
+    nameSpan.textContent = name;
+
+    const dlBtn = document.createElement('button');
+    dlBtn.className = 'dl-btn';
+    dlBtn.title = 'JPEGで保存';
+    dlBtn.setAttribute('aria-label', 'JPEGで保存');
+    dlBtn.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+
+    overlay.appendChild(nameSpan);
+    overlay.appendChild(dlBtn);
+    div.appendChild(img);
+    div.appendChild(overlay);
+    gallery.appendChild(div);
+
+    img.addEventListener('click', () => openLightbox(idx));
+    div.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') openLightbox(idx); });
+    dlBtn.addEventListener('click', e => { e.stopPropagation(); downloadImage(idx); });
+  }
+
+  function updateStats() {
+    statsEl.classList.remove('hidden');
+    statCount.textContent = totalLoaded;
+    if (totalFailed > 0) {
+      statFail.style.display = '';
+      statFail.textContent = `${totalFailed} 枚読み込み失敗`;
+    }
+  }
+
+  function openLightbox(idx) {
+    lbIdx = idx;
+    refreshLightbox();
+    lightbox.classList.add('open');
+    document.getElementById('lb-close').focus();
+  }
+
+  function refreshLightbox() {
+    lbImg.src = images[lbIdx].url;
+    lbName.textContent = images[lbIdx].name;
+    lbCounter.textContent = `${lbIdx + 1} / ${images.length}`;
+  }
+
+  function downloadImage(idx) {
+    const a = document.createElement('a');
+    a.href = images[idx].url;
+    a.download = images[idx].name.replace(/\.ss$/i, '') + '.jpg';
+    a.click();
+  }
+
+  document.getElementById('lb-prev').addEventListener('click', () => {
+    lbIdx = (lbIdx - 1 + images.length) % images.length;
+    refreshLightbox();
+  });
+  document.getElementById('lb-next').addEventListener('click', () => {
+    lbIdx = (lbIdx + 1) % images.length;
+    refreshLightbox();
+  });
+  document.getElementById('lb-close').addEventListener('click', () => lightbox.classList.remove('open'));
+  document.getElementById('lb-dl').addEventListener('click', () => downloadImage(lbIdx));
+  lightbox.addEventListener('click', e => { if (e.target === lightbox) lightbox.classList.remove('open'); });
+
+  document.addEventListener('keydown', e => {
+    if (!lightbox.classList.contains('open')) return;
+    if (e.key === 'ArrowLeft') document.getElementById('lb-prev').click();
+    if (e.key === 'ArrowRight') document.getElementById('lb-next').click();
+    if (e.key === 'Escape') lightbox.classList.remove('open');
+  });
+
+  fileInput.addEventListener('change', e => processFiles(e.target.files));
+
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    processFiles(e.dataTransfer.files);
+  });
+</script>
+</body>
+</html>
